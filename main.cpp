@@ -20,6 +20,7 @@ typedef NefPolyhedron::Traits Traits;
 typedef CGAL::Polyhedron_3<Traits> Polyhedron;
 typedef Kernel::Line_3 Line_3;
 typedef Kernel::Point_3 Point_3;
+typedef Kernel::Direction_3 Direction_3;
 
 using namespace std;
 
@@ -64,18 +65,38 @@ using namespace std;
 
 void printHelp();
 
-TopoDS_Shape incorporateNefPolyhedron(NefPolyhedron p,
-    set<Point_3> & accumPoints, set<Plane_3, PlaneLT> accumPlanes, 
-    map<Point_3, TopoDS_Vertex> & convertPoints,
-    map<Plane_3, pg_Pln, PlaneLT> & convertPlanes);
 
-TopoDS_Compound mergeSolids(const vector<TopoDS_Shape> & solids);
+void translatePoints(const set<Point_3> & inPoints,
+    map<Point_3, TopoDS_Vertex> & outMap);
+void translateLines(const set<Line_3, LineLT> & inLines,
+    map<Line_3, gp_Lin, LineLT> & outMap);
+void translatePlanes(const set<Plane_3, PlaneLT> & inPlanes,
+    map<Plane_3, gp_Pln, PlaneLT> & outMap);
+TopoDS_Solid translateSolid(const vector<Shell> & shells,
+    const map<Point_3, TopoDS_Vertex> & pointMap,
+    const map<Line_3, gp_Lin, LineLT> & lineMap,
+    const map<Plane_3, gp_Pln, PlaneLT> & planeMap);
+
+
+std::vector<Shell> shellNefPolyhedron(NefPolyhedron p,
+    set<Point_3> & accumPoints,
+    set<Line_3, LineLT> & accumLines,
+    set<Plane_3, PlaneLT> accumPlanes);
+//    , 
+//    map<Point_3, gp_Pnt> & convertPoints,
+//    map<Line_3, gp_Lin, LineLT> & convertLines,
+//    map<Plane_3, gp_Pln, PlaneLT> & convertPlanes);
+
+TopoDS_Compound mergeSolids(const vector<vector<Shell> > & solids,
+    const set<Point_3> & uniquePoints,
+    const set<Line_3, LineLT> & uniqueLines,
+    const set<Plane_3, PlaneLT> & uniquePlanes);
 
 NefPolyhedron loadMultiOFF(istream & instr);
 NefPolyhedron loadSTL(ifstream & instr);
 NefPolyhedron loadOFF(ifstream & instr);
 
-void nefToBRep(const NefPolyhedron & poly);
+//void nefToBRep(const NefPolyhedron & poly);
 
 string sFileExtension(const string & fname)
 {
@@ -95,9 +116,10 @@ int main(int argc, char const** argv)
         return 0;
     }
     
-    set<Point_3> allPoints;
-    set<Plane_3, PlaneLT> allPlanes;
-    vector<TopoDS_Shape> solids;
+    set<Point_3> uniquePoints;
+    set<Line_3, LineLT> uniqueLines;
+    set<Plane_3, PlaneLT> uniquePlanes;
+    vector<vector<Shell> > solids;
     
     int numInputFiles = argc - 1;
     for (int inputFileNum = 0; inputFileNum < numInputFiles; inputFileNum++)
@@ -106,7 +128,7 @@ int main(int argc, char const** argv)
         string fileExt;
         
         NefPolyhedron nef;
-        TopoDS_Shape newSolid;
+        vector<Shell> shells;
         
         bool loaded = true;
         
@@ -158,12 +180,14 @@ int main(int argc, char const** argv)
         
         if (loaded)
         {
-            newSolid = incorporateNefPolyhedron(nef, allPoints, allPlanes);
-            solids.push_back(newSolid);
+            shells = shellNefPolyhedron(nef,
+                uniquePoints, uniqueLines, uniquePlanes);
+            solids.push_back(shells);
         }
     }
     
-    TopoDS_Compound allSolids = mergeSolids(solids);
+    TopoDS_Compound allSolids = mergeSolids(solids,
+        uniquePoints, uniqueLines, uniquePlanes);
     
     STEPControl_Writer stepWriter;
     
@@ -239,7 +263,7 @@ NefPolyhedron loadOFF(ifstream & instr)
 }
 
 
-// This function converts one Nef polyhedron to a TopoDS_Solid.
+// This function converts one Nef polyhedron to a vector of shells.
 // Ideally solids with coplanar, touching faces should be identifiable as
 // such to programs that use the STEP file we're making here.  I try to make
 // this as likely as possible by not creating any redundant TopoDS_Vertex or
@@ -255,10 +279,10 @@ NefPolyhedron loadOFF(ifstream & instr)
 // one of each orientation, i.e. to me a plane has no up or down orientation.
 // I don't believe that OpenCASCADE needs to know the surface orientation for
 // anything that I'm doing with it.
-TopoDS_Shape incorporateNefPolyhedron(NefPolyhedron p,
-    set<Point_3> & accumPoints, set<Plane_3, PlaneLT> accumPlanes,
-    map<Point_3, TopoDS_Vertex> & convertPoints,
-    map<Plane_3, pg_Pln, PlaneLT> & convertPlanes)
+std::vector<Shell> shellNefPolyhedron(NefPolyhedron poly,
+    set<Point_3> & accumPoints,
+    set<Line_3, LineLT> & accumLines,
+    set<Plane_3, PlaneLT> accumPlanes)
 {
     typedef NefPolyhedron::Halffacet_cycle_const_iterator
         HalffacetCycleConstIterator;
@@ -266,7 +290,7 @@ TopoDS_Shape incorporateNefPolyhedron(NefPolyhedron p,
     typedef NefPolyhedron::Shell_entry_const_iterator ShellEntryConstIterator;
     typedef NefPolyhedron::SFace_const_handle SFaceConstHandle;
     
-    ShellMapper shellVisitor;
+    ShellMapper shellMapper(accumPoints, accumLines, accumPlanes);
     
     vector<VolumeConstHandle> insideVolumes =
         InteriorVolumes::interiorVolumes(poly);
@@ -287,61 +311,183 @@ TopoDS_Shape incorporateNefPolyhedron(NefPolyhedron p,
         for (itr = insideVolumes[volNum]->shells_begin();
             itr != insideVolumes[volNum]->shells_end(); itr++)
         {
-            shellVisitor.newShell();
+            shellMapper.newShell();
             
             cout << "\tShell " << shell++ << "\n";
             poly.visit_shell_objects(SFaceConstHandle(itr),
-                shellVisitor);
+                shellMapper);
         }
     }
+    
+    // Now the NefPolyhedron has been decomposed into its shells by the
+    // shell mapper.
+    
+    return shellMapper.shells();
 }
 
 // This function just tosses a bunch of TopoDS_Shapes into one TopoDS_Compound.
-TopoDS_Compound mergeSolids(const vector<TopoDS_Shape> & solids)
+TopoDS_Compound mergeSolids(const vector<vector<Shell> > & solids,
+    const set<Point_3> & uniquePoints,
+    const set<Line_3, LineLT> & uniqueLines,
+    const set<Plane_3, PlaneLT> & uniquePlanes)
 {
+    map<Point_3, TopoDS_Vertex> convertPoints;
+    map<Line_3, gp_Lin, LineLT> convertLines;
+    map<Plane_3, gp_Pln, PlaneLT> convertPlanes;
+    
+    translatePoints(uniquePoints, convertPoints);
+    translateLines(uniqueLines, convertLines);
+    translatePlanes(uniquePlanes, convertPlanes);
+    
+    // Time to handle the topology for each solid!!
+    
+    TopoDS_Compound compound;
+    BRep_Builder buildCompound;
+    buildCompound.MakeCompound(compound);
+    
+    for (int iSolid = 0; iSolid < solids.size(); iSolid++)
+    {
+        TopoDS_Solid solid = translateSolid(solids[iSolid], 
+            convertPoints, convertLines, convertPlanes);
+        buildCompound.Add(compound, solid);
+    }
+    
+    return compound;
 }
 
+void translatePoints(const set<Point_3> & inPoints,
+    map<Point_3, TopoDS_Vertex> & outMap)
+{
+    for (set<Point_3>::const_iterator itr = inPoints.begin();
+        itr != inPoints.end(); itr++)
+    {
+        outMap[*itr] = BRepBuilderAPI_MakeVertex(gp_Pnt(
+            CGAL::to_double(itr->x()),
+            CGAL::to_double(itr->y()),
+            CGAL::to_double(itr->z())));
+    }
+}
+
+void translateLines(const set<Line_3, LineLT> & inLines,
+    map<Line_3, gp_Lin, LineLT> & outMap)
+{
+    for (set<Line_3, LineLT>::const_iterator itr = inLines.begin();
+        itr != inLines.end(); itr++)
+    {
+        Point_3 inPt = itr->point(0); // the 0 is sort of a seed value.
+        gp_Pnt outPt(CGAL::to_double(inPt[0]),
+            CGAL::to_double(inPt[1]),
+            CGAL::to_double(inPt[2]));
+            
+        Direction_3 inDir = itr->direction();
+        gp_Dir outDir(CGAL::to_double(inDir.dx()),
+            CGAL::to_double(inDir.dy()),
+            CGAL::to_double(inDir.dz()));
+        
+        outMap[*itr] = gp_Lin(outPt, outDir);
+    }
+}
+
+void translatePlanes(const set<Plane_3, PlaneLT> & inPlanes,
+    map<Plane_3, gp_Pln, PlaneLT> & outMap)
+{
+    for (set<Plane_3, PlaneLT>::const_iterator itr = inPlanes.begin();
+        itr != inPlanes.end(); itr++)
+    {
+        outMap[*itr] = gp_Pln(CGAL::to_double(itr->a()),
+            CGAL::to_double(itr->b()),
+            CGAL::to_double(itr->c()),
+            CGAL::to_double(itr->d()));
+    }
+}
+
+TopoDS_Solid translateSolid(const vector<Shell> & shells,
+    const map<Point_3, TopoDS_Vertex> & pointMap,
+    const map<Line_3, gp_Lin, LineLT> & lineMap,
+    const map<Plane_3, gp_Pln, PlaneLT> & planeMap)
+{
+    vector<TopoDS_Shell> newShells(shells.size());
+    
+    for (int iShell = 0; iShell < shells.size(); iShell++)
+    {
+        const Shell & shell = shells.at(iShell);
+        
+        TopoDS_Shell newShell;
+        BRep_Builder buildShell;
+        buildShell.MakeShell(newShell);
+        
+        for (int iFace = 0; iFace < shell.size(); iFace++)
+        {
+            const Face & face = shell.at(iFace);
+            
+            vector<TopoDS_Wire> newWires(face.contours().size());
+            
+            for (int iContour = 0; iContour < face.contours().size(); iContour++)
+            {
+                const Contour & contour = face.contours()[iContour];
+                
+                BRep_Builder buildWire;
+                buildWire.MakeWire(newWires[iContour]);
+                
+                for (int iVertex = 0; iVertex < contour.points().size(); iVertex++)
+                {
+                    int iNext = (iVertex+1) % contour.points().size();
+                    
+                    assert(pointMap.count(contour.points()[iVertex]));
+                    assert(pointMap.count(contour.points()[iNext]));
+                    buildWire.Add(newWires[iContour], BRepBuilderAPI_MakeEdge(
+                        lineMap.find(contour.lines()[iVertex])->second,
+                        pointMap.find(contour.points()[iVertex])->second,
+                        pointMap.find(contour.points()[iNext])->second));
+                }
+                
+                BRepCheck_Wire checkWire(newWires[iContour]);
+                assert(checkWire.Closed() == BRepCheck_NoError);
+                assert(checkWire.Orientation(TopoDS_Face()) == BRepCheck_NoError);
+            }
+            
+            TopoDS_Face newFace;
+            BRepBuilderAPI_MakeFace makeFace(planeMap.find(face.plane())->second,
+                newWires[0]);
+            
+            for (int nn = 1; nn < newWires.size(); nn++)
+                makeFace.Add(newWires[nn]);
+            
+            BRepCheck_Face checkFace(newFace);
+            assert(checkFace.IntersectWires() == BRepCheck_NoError);
+            assert(checkFace.ClassifyWires() == BRepCheck_NoError);
+            assert(checkFace.OrientationOfWires() == BRepCheck_NoError);
+            
+            buildShell.Add(newShell, newFace);
+        }
+        
+        ShapeUpgrade_ShellSewing sewing;
+        TopoDS_Shape sewedShell = sewing.ApplySewing(newShell);
+        assert(sewedShell.ShapeType() == TopAbs_SHELL);
+        TopoDS_Shell & finalShell = newShells[iShell];
+        finalShell = TopoDS::Shell(sewedShell);
+        
+        BRepCheck_Shell checkShell(finalShell);
+        assert(checkShell.Closed() == BRepCheck_NoError);
+        assert(checkShell.Orientation() == BRepCheck_NoError);
+    }
+    
+    TopoDS_Solid newSolid;
+    BRep_Builder buildSolid;
+    buildSolid.MakeSolid(newSolid);
+    
+    for (int iShell = 0; iShell < newShells.size(); iShell++)
+    {
+        buildSolid.Add(newSolid, newShells.at(iShell));
+    }
+    
+    return newSolid;
+}
+
+/*
 
 void nefToBRep(const NefPolyhedron & poly)
 {
-    typedef NefPolyhedron::Halffacet_cycle_const_iterator
-        HalffacetCycleConstIterator;
-    typedef NefPolyhedron::Volume_const_handle VolumeConstHandle;
-    typedef NefPolyhedron::Shell_entry_const_iterator ShellEntryConstIterator;
-    typedef NefPolyhedron::SFace_const_handle SFaceConstHandle;
-    
-    ShellMapper shellVisitor;
-    
-    vector<VolumeConstHandle> insideVolumes =
-        InteriorVolumes::interiorVolumes(poly);
-    
-    if (insideVolumes.size() > 1)
-    {
-        cerr << "Error: I can't handle more than one volume yet.\n";
-        assert(false);
-    }
-    
-    for (int volNum = 0; volNum < insideVolumes.size(); volNum++)
-    {
-        cerr << "Volume " << volNum << "\n";
-        
-        int shell = 0;
-        
-        ShellEntryConstIterator itr;
-        for (itr = insideVolumes[volNum]->shells_begin();
-            itr != insideVolumes[volNum]->shells_end(); itr++)
-        {
-            shellVisitor.newShell();
-            
-            cout << "\tShell " << shell++ << "\n";
-            poly.visit_shell_objects(SFaceConstHandle(itr),
-                shellVisitor);
-        }
-    }
-    
-    // Now convert the points, edges, wires, faces, shells, and lastly solid.
-    
-    
     map<Point_3, TopoDS_Vertex> vertices;
     map<Segment, TopoDS_Edge> edges;
     map<Plane_3, gp_Pln, PlaneLT> planes;
@@ -514,3 +660,5 @@ void nefToBRep(const NefPolyhedron & poly)
     
     stepWriter.Transfer(newSolid, STEPControl_AsIs);
 }
+*/
+
