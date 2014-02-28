@@ -147,6 +147,7 @@ public:
         // This seems ridiculous.
         
         // *** Save the plane!  This will discard plane orientations.
+        
         mUniquePlanes.insert(plane);
         
         vector<Contour> faceContours;
@@ -177,6 +178,9 @@ public:
                     Vector3d vert(toVector3d(pointOnContour));
                     boundingBox.p1 = vec_min(boundingBox.p1, vert);
                     boundingBox.p2 = vec_max(boundingBox.p2, vert);
+                    
+//                    if (0 == mUniquePoints.count(pointOnContour))
+//                        std::cout << "Inserting point " << pointOnContour << ".\n";
                     
                     mUniquePoints.insert(pointOnContour); // *** Save the point!
                 } while (edgeHandle != firstEdgeHandle);

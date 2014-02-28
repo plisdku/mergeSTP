@@ -11,6 +11,7 @@
 #include <CGAL/Polyhedron_incremental_builder_3.h>
 #include <CGAL/IO/Nef_polyhedron_iostream_3.h>
 #include <CGAL/OFF_to_nef_3.h>
+#include <CGAL/Segment_3.h>
 
 typedef CGAL::Exact_predicates_exact_constructions_kernel Kernel;
 typedef CGAL::Nef_polyhedron_3<Kernel> NefPolyhedron;
@@ -62,9 +63,9 @@ using namespace std;
 #include <Interface_Static.hxx>
 
 #include "ShellMapper.h"
+#include "LoadSTL.h"
 
 void printHelp();
-
 
 void translatePoints(const set<Point_3> & inPoints,
     map<Point_3, TopoDS_Vertex> & outMap);
@@ -77,15 +78,10 @@ TopoDS_Solid translateSolid(const vector<Shell> & shells,
     const map<Line_3, gp_Lin, LineLT> & lineMap,
     const map<Plane_3, gp_Pln, PlaneLT> & planeMap);
 
-
 std::vector<Shell> shellNefPolyhedron(NefPolyhedron p,
     set<Point_3> & accumPoints,
     set<Line_3, LineLT> & accumLines,
-    set<Plane_3, PlaneLT> accumPlanes);
-//    , 
-//    map<Point_3, gp_Pnt> & convertPoints,
-//    map<Line_3, gp_Lin, LineLT> & convertLines,
-//    map<Plane_3, gp_Pln, PlaneLT> & convertPlanes);
+    set<Plane_3, PlaneLT> & accumPlanes);
 
 TopoDS_Compound mergeSolids(const vector<vector<Shell> > & solids,
     const set<Point_3> & uniquePoints,
@@ -95,8 +91,6 @@ TopoDS_Compound mergeSolids(const vector<vector<Shell> > & solids,
 NefPolyhedron loadMultiOFF(istream & instr);
 NefPolyhedron loadSTL(ifstream & instr);
 NefPolyhedron loadOFF(ifstream & instr);
-
-//void nefToBRep(const NefPolyhedron & poly);
 
 string sFileExtension(const string & fname)
 {
@@ -136,6 +130,8 @@ int main(int argc, char const** argv)
         {
             ifstream inStream(fileName.c_str());
             
+            if (!inStream)
+                throw(std::runtime_error("Stream is not 'true'."));
             if (inStream.bad())
                 throw(std::runtime_error("Stream is bad."));
             else if (inStream.fail())
@@ -200,6 +196,7 @@ int main(int argc, char const** argv)
 //    assert(Interface_Static::SetCVal("write.step.schema","1"));
     
     stepWriter.Transfer(allSolids, STEPControl_AsIs);
+    stepWriter.Write("outStep.step");
     
     return 0;
 }
@@ -209,7 +206,6 @@ void printHelp()
     cout << "Usage:\n";
     cout << "\tNefCascade\n";
 }
-
 
 NefPolyhedron loadMultiOFF(istream & instr)
 {
@@ -247,8 +243,13 @@ NefPolyhedron loadMultiOFF(istream & instr)
 }
 
 NefPolyhedron loadSTL(ifstream & instr)
-{
-    throw(std::logic_error("I can't load STL yet."));
+{   
+    Polyhedron polyhedron;
+    
+    LoadSTL::BuildSTL<Polyhedron::HalfedgeDS> builder(instr);
+    polyhedron.delegate(builder);
+    
+    return NefPolyhedron(polyhedron);
 }
 
 NefPolyhedron loadOFF(ifstream & instr)
@@ -282,7 +283,7 @@ NefPolyhedron loadOFF(ifstream & instr)
 std::vector<Shell> shellNefPolyhedron(NefPolyhedron poly,
     set<Point_3> & accumPoints,
     set<Line_3, LineLT> & accumLines,
-    set<Plane_3, PlaneLT> accumPlanes)
+    set<Plane_3, PlaneLT> & accumPlanes)
 {
     typedef NefPolyhedron::Halffacet_cycle_const_iterator
         HalffacetCycleConstIterator;
@@ -433,12 +434,49 @@ TopoDS_Solid translateSolid(const vector<Shell> & shells,
                 {
                     int iNext = (iVertex+1) % contour.points().size();
                     
+                    assert(lineMap.count(contour.lines()[iVertex]));
                     assert(pointMap.count(contour.points()[iVertex]));
                     assert(pointMap.count(contour.points()[iNext]));
-                    buildWire.Add(newWires[iContour], BRepBuilderAPI_MakeEdge(
-                        lineMap.find(contour.lines()[iVertex])->second,
-                        pointMap.find(contour.points()[iVertex])->second,
-                        pointMap.find(contour.points()[iNext])->second));
+                    
+                    const TopoDS_Vertex & p1 = pointMap.find(contour.points()[iVertex])->second;
+                    const TopoDS_Vertex & p2 = pointMap.find(contour.points()[iNext])->second;
+                    
+//                    cout << "\tadding " << contour.points()[iVertex]
+//                        << "[" << p1.HashCode(99999) << "]" << " to "
+//                        << contour.points()[iNext]
+//                        << "[" << p2.HashCode(99999) << "]" << "\n";
+                        
+                    const gp_Lin & line = lineMap.find(contour.lines()[iVertex])->second;
+                    
+                    // An edge's orientation depends on the orientation of its
+                    // underlying curve.  It seems important to construct the
+                    // edge so that it points "forward" parallel to the line
+                    // it lies on.
+                    //
+                    // I didn't see a straightforward way to find the gp_Pnt
+                    // of a TopoDS_Vertex, so I'm building the p1p2 vector from
+                    // the CGAL points and translating that to an OpenCASCADE
+                    // vector, then comparing to the OpenCASCADE line direction.
+                    
+                    const Point_3 & p1cgal = contour.points()[iVertex];
+                    const Point_3 & p2cgal = contour.points()[iNext];
+                    Kernel::Vector_3 p1p2cgal = Kernel::Segment_3(p1cgal, p2cgal).to_vector();
+                    
+                    gp_Vec p1p2(CGAL::to_double(p1p2cgal[0]),
+                        CGAL::to_double(p1p2cgal[1]), 
+                        CGAL::to_double(p1p2cgal[2]));
+                    gp_Vec lineVec(line.Direction());
+                    
+                    TopoDS_Edge edge;
+                    
+                    // here's the step where I care about the orientations.
+                    // there are two ways to build the edge.  choose wisely. :-)
+                    if (p1p2.Dot(lineVec) > 0)
+                        edge = BRepBuilderAPI_MakeEdge(line, p1, p2);
+                    else
+                        edge = BRepBuilderAPI_MakeEdge(line.Reversed(), p1, p2);
+                    
+                    buildWire.Add(newWires[iContour], edge);
                 }
                 
                 BRepCheck_Wire checkWire(newWires[iContour]);
@@ -446,13 +484,16 @@ TopoDS_Solid translateSolid(const vector<Shell> & shells,
                 assert(checkWire.Orientation(TopoDS_Face()) == BRepCheck_NoError);
             }
             
+//            cout << "Plane: " << face.plane() << "\n";
             TopoDS_Face newFace;
+            assert(planeMap.count(face.plane()));
             BRepBuilderAPI_MakeFace makeFace(planeMap.find(face.plane())->second,
                 newWires[0]);
             
             for (int nn = 1; nn < newWires.size(); nn++)
                 makeFace.Add(newWires[nn]);
             
+            newFace = makeFace;
             BRepCheck_Face checkFace(newFace);
             assert(checkFace.IntersectWires() == BRepCheck_NoError);
             assert(checkFace.ClassifyWires() == BRepCheck_NoError);
@@ -483,182 +524,3 @@ TopoDS_Solid translateSolid(const vector<Shell> & shells,
     
     return newSolid;
 }
-
-/*
-
-void nefToBRep(const NefPolyhedron & poly)
-{
-    map<Point_3, TopoDS_Vertex> vertices;
-    map<Segment, TopoDS_Edge> edges;
-    map<Plane_3, gp_Pln, PlaneLT> planes;
-    map<Contour, TopoDS_Wire> wires;
-    map<Face, TopoDS_Face> faces;
-    vector<TopoDS_Shell> shells;
-    
-    const set<Point_3> & points = shellVisitor.CGALPoints();
-    const set<Segment> & segs = shellVisitor.CGALSegments();
-    const set<Contour> & contours = shellVisitor.contours();
-    const set<FaceAndPlane> & inFaces = shellVisitor.faces();
-    const set<Plane_3, PlaneLT> & inPlanes = shellVisitor.planes();
-    
-    const vector<vector<Face> > & shellFaces = shellVisitor.shellFaces();
-    
-    cout << "\n---- Point list:\n";
-    for (set<Point_3>::const_iterator itr = points.begin();
-        itr != points.end(); itr++)
-    {
-        Point_3 p = *itr;
-        //cout << p << "\n";
-        
-        vertices[p] = BRepBuilderAPI_MakeVertex(gp_Pnt(
-            CGAL::to_double(p[0]),
-            CGAL::to_double(p[1]),
-            CGAL::to_double(p[2])));
-    }
-    
-    cout << "\n---- Segment list:\n";
-    for (set<Segment>::const_iterator itr = segs.begin();
-        itr != segs.end(); itr++)
-    {
-        Segment s = *itr;
-        cout << s[0] << " to " << s[1] << "\n";
-        
-        edges[s] = BRepBuilderAPI_MakeEdge(
-            vertices[s[0]], vertices[s[1]]);
-    }
-    
-    cout << "\n---- Contour list:\n";
-    for (set<Contour>::const_iterator itr = contours.begin();
-        itr != contours.end(); itr++)
-    {
-        const Contour & contour = *itr;
-        cout << "Contour of length " << contour.size() << "\n";
-        
-        TopoDS_Wire newWire;
-        BRep_Builder builder;
-        builder.MakeWire(newWire);
-        
-        for (int nn = 0; nn < contour.size(); nn++)
-        {
-            int mm = (nn+1) % contour.size();
-            // used to use toSegment, with the disoriented ShellMapper.
-            Segment mySegment = Segment(contour[nn], contour[mm]);
-            
-            assert(edges.count(mySegment));
-            builder.Add(newWire, edges[mySegment]);
-        }
-        
-        //newWire.Closed(true);
-        wires[contour] = newWire;
-        
-        BRepCheck_Wire checkWire(newWire);
-        BRepCheck_Status status = checkWire.Closed();
-        assert(status == BRepCheck_NoError);
-        status = checkWire.Orientation(TopoDS_Face()); // using a null face since no face exists
-        assert(status == BRepCheck_NoError);
-        
-        //for (int nn = 0; nn < contour.size(); nn++)
-        //    cout << contour[nn] << " ";
-        //cout << "\n";
-    }
-    
-    cout << "\n---- Surface list:\n";
-    for (set<Plane_3>::const_iterator itr = inPlanes.begin();
-        itr != inPlanes.end(); itr++)
-    {
-        const Plane_3 & plane = *itr;
-        
-        planes[plane] = gp_Pln(CGAL::to_double(plane.a()),
-            CGAL::to_double(plane.b()),
-            CGAL::to_double(plane.c()),
-            CGAL::to_double(plane.d()));
-    }
-    
-    cout << "\n---- Face list:\n";
-    for (set<FaceAndPlane>::const_iterator itr = inFaces.begin();
-        itr != inFaces.end(); itr++)
-    {
-        const Face & face = itr->face;
-        cout << "Face of length " << face.size() << "\n";
-        
-        assert(planes.count(itr->plane));
-        
-        BRepBuilderAPI_MakeFace makeFace(planes[itr->plane], wires[face[0]]);
-        for (int nn = 1; nn < face.size(); nn++)
-        {
-            assert(wires.count(face[nn]));
-            makeFace.Add(wires[face[nn]]);
-        }
-        
-        TopoDS_Face newFace = makeFace;
-        faces[face] = newFace;
-        
-        BRepCheck_Face checkFace(newFace);
-        BRepCheck_Status status = checkFace.IntersectWires();
-        assert(status == BRepCheck_NoError);
-        status = checkFace.ClassifyWires();
-        assert(status == BRepCheck_NoError);
-        status = checkFace.OrientationOfWires();
-        assert(status == BRepCheck_NoError);
-    }
-    
-    cout << "\n---- Shell list:\n";
-    for (int nn = 0; nn < shellFaces.size(); nn++)
-    {
-        
-        TopoDS_Shell newShell;
-        BRep_Builder builder;
-        builder.MakeShell(newShell);
-        
-        for (int mm = 0; mm < shellFaces[nn].size(); mm++)
-        {
-            const Face & face = shellFaces[nn][mm];
-            assert(faces.count(face));
-            builder.Add(newShell, faces[face]);
-        }
-        
-        ShapeUpgrade_ShellSewing sewing;
-        TopoDS_Shape sewedShell = sewing.ApplySewing(newShell);
-        assert(sewedShell.ShapeType() == TopAbs_SHELL);
-        TopoDS_Shell newerShell = TopoDS::Shell(sewedShell);
-        
-        BRepCheck_Shell checkShell(newerShell);
-        BRepCheck_Status status = checkShell.Closed();
-        assert(status == BRepCheck_NoError);
-        status = checkShell.Orientation();
-        assert(status == BRepCheck_NoError);
-        
-        shells.push_back(newerShell);
-        
-        cout << "Shell " << nn << " has " << shellFaces[nn].size() << " faces.\n";
-    }
-    
-    cout << "\n---- Build solid:\n";
-    
-    TopoDS_Solid newSolid;
-    BRep_Builder builder;
-    builder.MakeSolid(newSolid);
-    
-    for (int nn = 0; nn < shells.size(); nn++)
-    {
-        builder.Add(newSolid, shells[nn]);
-    }
-    
-    BRepTools::Dump(newSolid, cout);
-
-    cout << "\n---- Write solid to STP file:\n";
-
-    STEPControl_Writer stepWriter;
-    
-    // 0: writes STEP files without assemblies
-    // 1: writes all shapes in the form of assemblies
-    // 2: writes shapes having a structure of (possibly nested) TopoDS_Compounds in the form of
-    //    STEP assemblies; single shapes are written without assembly structures.
-    assert(Interface_Static::SetIVal("write.step.assembly", 2));
-    
-//    assert(Interface_Static::SetCVal("write.step.schema","1"));
-    
-    stepWriter.Transfer(newSolid, STEPControl_AsIs);
-}
-*/
-
