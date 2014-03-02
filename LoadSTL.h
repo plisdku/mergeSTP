@@ -64,7 +64,7 @@ public:
             getline(mStream, line);
             istringstream stream(line);
             
-            cout << "Line is " << line << "\n";
+//            cout << "Line is " << line << "\n";
             
             stream >> token;
             
@@ -101,12 +101,12 @@ public:
                     vertexIndices[p3] = numVertices;
                     vIndex = numVertices;
                     
-                    cout << "Added new vertex.\n";
+//                    cout << "Added new vertex.\n";
                 }
                 else
                 {
                     vIndex = vertexIndices[p3];
-                    cout << "Noted duplicate vertex.\n";
+//                    cout << "Noted duplicate vertex.\n";
                 }
                 
                 if (curTriangleVertex >= 0 && curTriangleVertex < 3)
@@ -140,20 +140,20 @@ public:
         for (int vv = 0; vv < verticesInOrder.size(); vv++)
         {
             builder.add_vertex(verticesInOrder[vv]);
-            cout << "Vertex " << vv << " is " << verticesInOrder[vv]
-                << " map " << vertexIndices[verticesInOrder[vv]] << "\n";
+//            cout << "Vertex " << vv << " is " << verticesInOrder[vv]
+//                << " map " << vertexIndices[verticesInOrder[vv]] << "\n";
         }
         
         for (int ff = 0; ff < triVerts[0].size(); ff++)
         {
-            cout << "Face " << ff << " is vertices ";
+//            cout << "Face " << ff << " is vertices ";
             builder.begin_facet();
             for (int vv = 0; vv < 3; vv++)
             {
                 builder.add_vertex_to_facet(triVerts[vv][ff]);
-                cout << triVerts[vv][ff] << " ";
+//                cout << triVerts[vv][ff] << " ";
             }
-            cout << "\n";
+//            cout << "\n";
             builder.end_facet();
         }
         

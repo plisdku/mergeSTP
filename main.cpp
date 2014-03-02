@@ -4,6 +4,7 @@
 #include <vector>
 #include <iomanip>
 #include <map>
+#include <algorithm>
 
 #include <CGAL/Exact_predicates_exact_constructions_kernel.h>
 #include <CGAL/Nef_polyhedron_3.h>
@@ -18,6 +19,7 @@ typedef CGAL::Nef_polyhedron_3<Kernel> NefPolyhedron;
 typedef NefPolyhedron::Point_3 Point_3;
 typedef NefPolyhedron::Plane_3 Plane_3;
 typedef NefPolyhedron::Traits Traits;
+typedef NefPolyhedron::Aff_transformation_3 Aff_transformation_3;
 typedef CGAL::Polyhedron_3<Traits> Polyhedron;
 typedef Kernel::Line_3 Line_3;
 typedef Kernel::Point_3 Point_3;
@@ -55,6 +57,12 @@ using namespace std;
 #include <BRepCheck_Wire.hxx>
 #include <BRepCheck_Shell.hxx>
 #include <ShapeUpgrade_ShellSewing.hxx>
+#include <ShapeFix_Shape.hxx>
+
+// things to check orientations
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
 
 #include <StlAPI.hxx>
 #include <StlAPI_Reader.hxx>
@@ -92,6 +100,10 @@ NefPolyhedron loadMultiOFF(istream & instr);
 NefPolyhedron loadSTL(ifstream & instr);
 NefPolyhedron loadOFF(ifstream & instr);
 
+void parseInput(int argc, char const** argv,
+    std::vector<std::string> & outFileNames, double & outScaleFactor, 
+    std::string & outUnitString);
+
 string sFileExtension(const string & fname)
 {
     int dotPosition = fname.find_last_of(".");
@@ -104,7 +116,24 @@ string sFileExtension(const string & fname)
 
 int main(int argc, char const** argv)
 {
-    if (argc == 1)
+    std::vector<std::string> inputFileNames;
+    
+    double scaleFactor = 1.0;
+    std::string unitString = "MM";
+    
+    try
+    {
+        parseInput(argc, argv, inputFileNames, scaleFactor, unitString);
+    }
+    catch (const std::exception & ex)
+    {
+        cerr << "Error parsing input: " << ex.what() << "\n";
+        printHelp();
+        return 1;
+    }
+    
+    int numInputFiles = inputFileNames.size();
+    if (numInputFiles == 0)
     {
         printHelp();
         return 0;
@@ -115,10 +144,11 @@ int main(int argc, char const** argv)
     set<Plane_3, PlaneLT> uniquePlanes;
     vector<vector<Shell> > solids;
     
-    int numInputFiles = argc - 1;
+    Aff_transformation_3 scalingTx(CGAL::SCALING, scaleFactor);
+    
     for (int inputFileNum = 0; inputFileNum < numInputFiles; inputFileNum++)
     {
-        string fileName(argv[inputFileNum+1]);
+        const string & fileName = inputFileNames[inputFileNum];
         string fileExt;
         
         NefPolyhedron nef;
@@ -165,6 +195,7 @@ int main(int argc, char const** argv)
             {
                 cout << "Unsure how to handle " << fileExt << " file; skipping "
                     << fileName << ".\n";
+                loaded = false;
             }
         }
         catch (const std::exception & exc)
@@ -176,6 +207,7 @@ int main(int argc, char const** argv)
         
         if (loaded)
         {
+            nef.transform(scalingTx); // as-needed to convert units!!
             shells = shellNefPolyhedron(nef,
                 uniquePoints, uniqueLines, uniquePlanes);
             solids.push_back(shells);
@@ -194,6 +226,7 @@ int main(int argc, char const** argv)
     assert(Interface_Static::SetIVal("write.step.assembly", 2));
     
 //    assert(Interface_Static::SetCVal("write.step.schema","1"));
+    assert(Interface_Static::SetCVal("write.step.unit", unitString.c_str()));
     
     stepWriter.Transfer(allSolids, STEPControl_AsIs);
     stepWriter.Write("outStep.step");
@@ -201,10 +234,69 @@ int main(int argc, char const** argv)
     return 0;
 }
 
+void parseInput(int argc, char const** argv,
+    std::vector<std::string> & outFileNames, double & outScaleFactor,
+    std::string & outUnitString)
+{
+    for (int nn = 1; nn < argc; nn++)
+    {
+        string token(argv[nn]);
+        
+        if (token == "-unit")
+        {
+            if (nn+1 >= argc)
+                throw(std::runtime_error("No unit given after -unit"));
+            
+            token = argv[++nn];
+            
+            if (token == "nm")
+            {
+                outScaleFactor = 1e-6;
+                outUnitString = "MM";
+            }
+            else if (token == "um")
+            {
+                outScaleFactor = 1e-3;
+                outUnitString = "MM";
+            }
+            else if (token == "mm")
+            {
+                outScaleFactor = 1.0;
+                outUnitString = "MM";
+            }
+            else if (token == "cm")
+            {
+                outScaleFactor = 1.0;
+                outUnitString = "CM";
+            }
+            else if (token == "m")
+            {
+                outScaleFactor = 1.0;
+                outUnitString = "M";
+            }
+            else if (token == "km")
+            {
+                outScaleFactor = 1.0;
+                outUnitString = "KM";
+            }
+            else
+                throw(std::runtime_error("Unrecognized unit string"));
+        }
+        else
+        {
+            outFileNames.push_back(token);
+        }
+    }
+}
+
 void printHelp()
 {
     cout << "Usage:\n";
-    cout << "\tNefCascade\n";
+    cout << "\tmergeSTP [file1] [file2] ...\n";
+    cout << "\tmergeSTP -unit nm [file1] [file2] ...\n";
+    cout << "-unit determines how lengths in input files are interpreted.\n";
+    cout << "Valid units are nm, um, mm, cm, m, km.\n";
+    cout << "Default unit is mm (standard for STEP files).\n";
 }
 
 NefPolyhedron loadMultiOFF(istream & instr)
@@ -304,7 +396,7 @@ std::vector<Shell> shellNefPolyhedron(NefPolyhedron poly,
     
     for (int volNum = 0; volNum < insideVolumes.size(); volNum++)
     {
-        cerr << "Volume " << volNum << "\n";
+//        cerr << "Volume " << volNum << "\n";
         
         int shell = 0;
         
@@ -314,7 +406,7 @@ std::vector<Shell> shellNefPolyhedron(NefPolyhedron poly,
         {
             shellMapper.newShell();
             
-            cout << "\tShell " << shell++ << "\n";
+//            cout << "\tShell " << shell++ << "\n";
             poly.visit_shell_objects(SFaceConstHandle(itr),
                 shellMapper);
         }
@@ -408,6 +500,8 @@ TopoDS_Solid translateSolid(const vector<Shell> & shells,
     const map<Plane_3, gp_Pln, PlaneLT> & planeMap)
 {
     vector<TopoDS_Shell> newShells(shells.size());
+
+    BRepCheck_Status status;
     
     for (int iShell = 0; iShell < shells.size(); iShell++)
     {
@@ -480,8 +574,8 @@ TopoDS_Solid translateSolid(const vector<Shell> & shells,
                 }
                 
                 BRepCheck_Wire checkWire(newWires[iContour]);
-                assert(checkWire.Closed() == BRepCheck_NoError);
-                assert(checkWire.Orientation(TopoDS_Face()) == BRepCheck_NoError);
+                assert( (status = checkWire.Closed()) == BRepCheck_NoError);
+                assert( (status = checkWire.Orientation(TopoDS_Face())) == BRepCheck_NoError);
             }
             
 //            cout << "Plane: " << face.plane() << "\n";
@@ -490,14 +584,49 @@ TopoDS_Solid translateSolid(const vector<Shell> & shells,
             BRepBuilderAPI_MakeFace makeFace(planeMap.find(face.plane())->second,
                 newWires[0]);
             
+//            for (int mm = 0; mm < newWires.size(); mm++)
+//            {
+//                cout << "Wire " << mm << " of " << newWires.size() << ":\n";
+//                
+//                TopAbs_Orientation o = newWires[mm].Orientation();
+//                if (o == TopAbs_FORWARD)
+//                    cout << "\t(forward)\n";
+//                else if (o == TopAbs_REVERSED)
+//                    cout << "\t(reversed)\n";
+//                else
+//                    cout << "\t(unknown orientation)\n";
+//                
+//                BRepTools::Dump(newWires[mm], cout);
+//            }
+            
+            // ok look, i don't understand why an inner wire that goes clockwise 
+            // is not automatically seen as a hole within an outer wire that goes 
+            // counterclockwise, but reversing the inner ones manually seems necessary,
+            // so here goes.  sigh.
             for (int nn = 1; nn < newWires.size(); nn++)
-                makeFace.Add(newWires[nn]);
+            {
+                makeFace.Add(TopoDS::Wire(newWires[nn].Reversed()));
+//                makeFace.Add(newWires[nn]);
+            }
             
             newFace = makeFace;
             BRepCheck_Face checkFace(newFace);
-            assert(checkFace.IntersectWires() == BRepCheck_NoError);
-            assert(checkFace.ClassifyWires() == BRepCheck_NoError);
-            assert(checkFace.OrientationOfWires() == BRepCheck_NoError);
+
+            assert( (status = checkFace.IntersectWires()) == BRepCheck_NoError);
+            assert( (status = checkFace.ClassifyWires()) == BRepCheck_NoError);
+            
+//            status = checkFace.OrientationOfWires();
+//            if (status != BRepCheck_NoError)
+//            {
+//                ShapeFix_Face fixFace;
+//                fixFace.Init(newFace);
+//                fixFace.FixOrientation();
+//                
+//                newFace = fixFace.Face();
+//                //newFace = TopoDS::Face(fixFace.Shape());
+//                status = BRepCheck_Face(newFace).OrientationOfWires();
+//            }
+            assert( (status = checkFace.OrientationOfWires()) == BRepCheck_NoError);
             
             buildShell.Add(newShell, newFace);
         }
@@ -521,6 +650,25 @@ TopoDS_Solid translateSolid(const vector<Shell> & shells,
     {
         buildSolid.Add(newSolid, newShells.at(iShell));
     }
+    
+    // NOW for some diagnostics!  Copied from Cauchy Ding's forum post.
+    BRepClass3d_SolidClassifier classify;
+    classify.Load(newSolid);
+    classify.PerformInfinitePoint(1.0e-4); // classify a distant point, in/out
+    TopAbs_State state = classify.State();
+    
+    if (state == TopAbs_IN)
+        cerr << "Warning: a solid is inside-out.\n";
+//    else
+//        cout << "Solid is oriented correctly.\n";
+    
+    // Next the volume diagnostic:
+    
+    GProp_GProps properties;
+    BRepGProp::VolumeProperties(newSolid, properties);
+    
+//    cout << "Solid mass is " << properties.Mass() << ".\n";
+    
     
     return newSolid;
 }
