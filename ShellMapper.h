@@ -25,6 +25,18 @@ bool operator<(Point_3 p1, Point_3 p2)
     return false;
 }
 
+bool operator<(Vector_3 p1, Vector_3 p2)
+{
+    for (int nn = 0; nn < 3; nn++)
+    {
+        if (p1[nn] < p2[nn])
+            return true;
+        else if (p1[nn] > p2[nn])
+            return false;
+    }
+    return false;
+}
+
 bool operator<(const NefPolyhedron::Vertex_const_handle & v1,
     const NefPolyhedron::Vertex_const_handle & v2)
 {
@@ -32,6 +44,7 @@ bool operator<(const NefPolyhedron::Vertex_const_handle & v1,
 }
 
 // This is essentially the unique key of a plane AND ITS OPPOSITE.
+// To disambiguate two planes that face oppositely, you need more info...
 Vector3<Point_3> planeProjections(const NefPolyhedron::Plane_3 & plane)
 {
     return Vector3<Point_3>(plane.projection(Point_3(1,0,0)),
@@ -43,7 +56,17 @@ struct PlaneLT
 {
     bool operator()(const Plane_3 & p1, const Plane_3 & p2) const
     {
-        return planeProjections(p1) < planeProjections(p2);
+        Vector3<Point_3> proj1 = planeProjections(p1);
+        Vector3<Point_3> proj2 = planeProjections(p2);
+        
+        if (proj1 < proj2)
+            return true;
+        else if (proj1 > proj2)
+            return false;
+        
+        return p1.orthogonal_vector() < p2.orthogonal_vector();
+        
+        //return planeProjections(p1) < planeProjections(p2);
     }
 };
 

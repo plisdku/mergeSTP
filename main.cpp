@@ -23,6 +23,7 @@ typedef NefPolyhedron::Aff_transformation_3 Aff_transformation_3;
 typedef CGAL::Polyhedron_3<Traits> Polyhedron;
 typedef Kernel::Line_3 Line_3;
 typedef Kernel::Point_3 Point_3;
+typedef Kernel::Vector_3 Vector_3;
 typedef Kernel::Direction_3 Direction_3;
 
 using namespace std;
@@ -568,7 +569,17 @@ TopoDS_Solid translateSolid(const vector<Shell> & shells,
                     if (p1p2.Dot(lineVec) > 0)
                         edge = BRepBuilderAPI_MakeEdge(line, p1, p2);
                     else
-                        edge = BRepBuilderAPI_MakeEdge(line.Reversed(), p1, p2);
+                    {
+                        gp_Lin floppedLine = line.Reversed();
+                        edge = BRepBuilderAPI_MakeEdge(floppedLine, p1, p2);
+                    }
+                    
+//                    if (iContour > 0)
+//                    {
+//                        cout << "v" << iVertex << ": " << p1p2.Dot(lineVec)
+//                            << " is " << p1cgal << " to " << p2cgal << "\n";
+//                        BRepTools::Dump(edge, cout);
+//                    }
                     
                     buildWire.Add(newWires[iContour], edge);
                 }
@@ -576,28 +587,22 @@ TopoDS_Solid translateSolid(const vector<Shell> & shells,
                 BRepCheck_Wire checkWire(newWires[iContour]);
                 assert( (status = checkWire.Closed()) == BRepCheck_NoError);
                 assert( (status = checkWire.Orientation(TopoDS_Face())) == BRepCheck_NoError);
+                
+//                if (iContour > 0)
+//                {
+//                    cout << "Inner wire dump:\n";
+//                    BRepTools::Dump(newWires[iContour], cout);
+//                    cout << "Reversed wire dump:\n";
+//                    BRepTools::Dump(newWires[iContour].Reversed(), cout);
+//                }
             }
             
-//            cout << "Plane: " << face.plane() << "\n";
             TopoDS_Face newFace;
             assert(planeMap.count(face.plane()));
             BRepBuilderAPI_MakeFace makeFace(planeMap.find(face.plane())->second,
                 newWires[0]);
+//            cout << "Plane is " << face.plane() << "\n";
             
-//            for (int mm = 0; mm < newWires.size(); mm++)
-//            {
-//                cout << "Wire " << mm << " of " << newWires.size() << ":\n";
-//                
-//                TopAbs_Orientation o = newWires[mm].Orientation();
-//                if (o == TopAbs_FORWARD)
-//                    cout << "\t(forward)\n";
-//                else if (o == TopAbs_REVERSED)
-//                    cout << "\t(reversed)\n";
-//                else
-//                    cout << "\t(unknown orientation)\n";
-//                
-//                BRepTools::Dump(newWires[mm], cout);
-//            }
             
             // ok look, i don't understand why an inner wire that goes clockwise 
             // is not automatically seen as a hole within an outer wire that goes 
@@ -605,28 +610,44 @@ TopoDS_Solid translateSolid(const vector<Shell> & shells,
             // so here goes.  sigh.
             for (int nn = 1; nn < newWires.size(); nn++)
             {
-                makeFace.Add(TopoDS::Wire(newWires[nn].Reversed()));
-//                makeFace.Add(newWires[nn]);
+//                makeFace.Add(TopoDS::Wire(newWires[nn].Reversed()));
+                makeFace.Add(newWires[nn]);
+                //BRepCheck_Wire checkWire(newWires[nn]);
+                //assert( (status = checkWire.Orientation(makeFace)) == BRepCheck_NoError);
             }
+            
             
             newFace = makeFace;
             BRepCheck_Face checkFace(newFace);
 
+            if (newWires.size() > 1)
+            {
+                BRepTools::Dump(newFace, cout);
+            }
+            
             assert( (status = checkFace.IntersectWires()) == BRepCheck_NoError);
             assert( (status = checkFace.ClassifyWires()) == BRepCheck_NoError);
             
-//            status = checkFace.OrientationOfWires();
-//            if (status != BRepCheck_NoError)
-//            {
-//                ShapeFix_Face fixFace;
-//                fixFace.Init(newFace);
-//                fixFace.FixOrientation();
-//                
-//                newFace = fixFace.Face();
-//                //newFace = TopoDS::Face(fixFace.Shape());
-//                status = BRepCheck_Face(newFace).OrientationOfWires();
-//            }
-            assert( (status = checkFace.OrientationOfWires()) == BRepCheck_NoError);
+            status = checkFace.OrientationOfWires();
+            if (status != BRepCheck_NoError)
+            {
+                cout << "A face needs fixing.\n";
+//                cout << "Face that needs fixing:\n";
+//                BRepTools::Dump(newFace, cout);
+                
+                BRepCheck_Face chk(newFace);
+                status = chk.OrientationOfWires();
+                ShapeFix_Face fixFace;
+                fixFace.Init(newFace);
+                fixFace.FixOrientation();
+                
+                newFace = fixFace.Face();
+                status = BRepCheck_Face(newFace).OrientationOfWires();
+                
+//                cout << "Face that is fixed:\n";
+//                BRepTools::Dump(newFace, cout);
+            }
+            assert( status == BRepCheck_NoError);
             
             buildShell.Add(newShell, newFace);
         }
