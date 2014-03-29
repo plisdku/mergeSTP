@@ -620,10 +620,10 @@ TopoDS_Solid translateSolid(const vector<Shell> & shells,
             newFace = makeFace;
             BRepCheck_Face checkFace(newFace);
 
-            if (newWires.size() > 1)
-            {
-                BRepTools::Dump(newFace, cout);
-            }
+//            if (newWires.size() > 1)
+//            {
+//                BRepTools::Dump(newFace, cout);
+//            }
             
             assert( (status = checkFace.IntersectWires()) == BRepCheck_NoError);
             assert( (status = checkFace.ClassifyWires()) == BRepCheck_NoError);
