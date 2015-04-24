@@ -9,48 +9,18 @@ if (COMMAND cmake_policy)
     cmake_policy(SET CMP0003 NEW)
 endif (COMMAND cmake_policy)
 
-# ----- OCE
+# ----- OpenCASCADE
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}")
 
-find_package(OCE)
-if(OCE_FOUND)
-    message(STATUS "Found OCE version ${OCE_VERSION}")
-    # Include files reside in ${OCE_INCLUDE_DIRS};
-    include_directories(${OCE_INCLUDE_DIRS})
-    # We do not need library path, they will be automatically imported.
-else(OCE_FOUND)
-    # OCE not found; either it is not found and user
-    # has to set OCE_DIR to the directory containing
-    # OCEConfig.cmake, or OCE is not installed and we
-    # try to find OpenCascade files.
-    if(DEFINED ENV{CASROOT})
-        if(NOT DEFINED OCC_INCLUDE_PATH)
-            set(OCC_INCLUDE_PATH "$ENV{CASROOT}/inc")
-        endif(NOT DEFINED OCC_INCLUDE_PATH)
-        if(NOT DEFINED OCC_LIB_PATH)
-            if(WIN32)
-                set(OCC_LIB_PATH "$ENV{CASROOT}/win32/lib")
-            else(WIN32)
-                if(APPLE)
-                    set(OCC_LIB_PATH "/Library/OpenCASCADE/6.3.0/lib")
-                else(APPLE)
-                    set(OCC_LIB_PATH "$ENV{CASROOT}/lin/lib")
-                endif(APPLE)
-            endif(WIN32)
-        endif(NOT DEFINED OCC_LIB_PATH)
-    else(DEFINED ENV{CASROOT})
-        if(NOT DEFINED OCC_INCLUDE_PATH OR NOT DEFINED OCC_LIB_PATH)
-            message(WARNING "To specify paths of OpenCascade files, you may either define the CASROOT environment variable, or set both OCC_INCLUDE_PATH and OCC_LIB_PATH variables.")
-        endif(NOT DEFINED OCC_INCLUDE_PATH OR NOT DEFINED OCC_LIB_PATH)
-    endif(DEFINED ENV{CASROOT})
-    if(DEFINED OCC_INCLUDE_PATH)
-        message(STATUS "OCC search path for include files: OCC_INCLUDE_PATH=${OCC_INCLUDE_PATH}")
-        include_directories(${OCC_INCLUDE_PATH})
-    endif(DEFINED OCC_INCLUDE_PATH)
-    if(DEFINED OCC_LIB_PATH)
-        message(STATUS "OCC search path for libraries: OCC_LIB_PATH=${OCC_LIB_PATH}")
-        link_directories(${OCC_LIB_PATH})
-    endif(DEFINED OCC_LIB_PATH)
-endif(OCE_FOUND)
+find_package(OpenCASCADE REQUIRED TKPrim TKSTL TKSTEP TKernel TKMath
+    TKG2d TKShHealing TKBRep TKTopAlgo)
+if (OpenCASCADE_FOUND)
+    message("Found OpenCASCADE")
+    message("Include dirs: ${OpenCASCADE_INCLUDE_DIR}")
+else(OpenCASCADE_FOUND)
+    message("Did not find OpenCASCADE")
+endif(OpenCASCADE_FOUND)
+
 
 # ---- done with the sillies
 
@@ -63,6 +33,7 @@ include( ${CGAL_USE_FILE} )
 include( CGAL_CreateSingleSourceCGALProgram )
 
 include_directories(
+    ${OpenCASCADE_INCLUDE_DIR}
 #    ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
@@ -79,5 +50,12 @@ target_link_libraries( mergeSTP
     TKPrim
     TKSTL
     TKSTEP
+    TKernel
+    TKMath
+    TKG2d
+    TKShHealing
+    TKBRep
+    TKTopAlgo
+    dl # what the heck is this anyway???  didn't need it on other machine.
 )
 
