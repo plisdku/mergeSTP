@@ -46,11 +46,11 @@ add_executable(testRLEOperations
 )
 target_link_libraries(testRLEOperations utility)
 
+
 macro(setupUnitTest executableName)
     target_link_libraries(${executableName} ${Boost_UNIT_TEST_FRAMEWORK_LIBRARY})
-    get_target_property( path ${executableName} LOCATION)
     add_custom_command( TARGET ${executableName} POST_BUILD
-        COMMAND ${path} --log_level=message)
+        COMMAND $<TARGET_FILE:${executableName}> --log_level=message)
 endmacro()
 
 setupUnitTest(testGeometry)
