@@ -20,7 +20,7 @@ IF( NOT OpenCASCADE_FOUND STREQUAL TRUE )
     else (APPLE)
       set( _testlibname libTKernel.so )
     endif (APPLE)
-    set( _libsearchpath /usr/lib /opt/occ/lib $ENV{CASROOT}/lib )
+    set( _libsearchpath /usr/lib /opt/occ/lib $ENV{CASROOT}/lib $ENV{CASROOT}/lin64/gcc/lib)
   ELSE(UNIX)
     IF (WIN32)
       MESSAGE("************ FindOpenCASCADE.cmake has not been tried on windows and may or may not work! *************")
@@ -31,6 +31,8 @@ IF( NOT OpenCASCADE_FOUND STREQUAL TRUE )
       message( FATAL_ERROR "Unknown system! Exiting." )
     ENDIF (WIN32)
   ENDIF (UNIX)
+
+ message("Searching for libs in ${_libsearchpath}")
 
   #find the include dir by looking for Standard_Real.hxx
   FIND_PATH( OpenCASCADE_INCLUDE_DIR Standard_Real.hxx PATHS ${_incsearchpath} DOC "Path to OCC includes" )
