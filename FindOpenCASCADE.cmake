@@ -12,6 +12,7 @@ message("Paul says OpenCASCADE_FOUND = ${OpenCASCADE_FOUND}.")
 #  OpenCASCADE_LINK_DIRECTORY - location of OCC libraries
 
 # ${OpenCASCADE_FOUND} is cached, so once OCC is found this block shouldn't have to run again
+
 if( NOT OpenCASCADE_FOUND STREQUAL TRUE )
     message(STATUS "Searching for OpenCASCADE.")
     if(UNIX)
@@ -21,7 +22,7 @@ if( NOT OpenCASCADE_FOUND STREQUAL TRUE )
         else (APPLE)
             set( _testlibname libTKernel.so )
         endif (APPLE)
-        set( _libsearchpath /usr/lib /opt/occ/lib $ENV{CASROOT}/lib )
+        set( _libsearchpath /usr/lib /opt/occ/lib $ENV{CASROOT}/lib $ENV{CASROOT}/lin64/gcc/lib $ENV{CASROOT}/mac64/clang/lib)
     else(UNIX)
         if (WIN32)
             message("************ FindOpenCASCADE.cmake has NOT been tried on windows and may or may NOT work! *************")
@@ -33,6 +34,7 @@ if( NOT OpenCASCADE_FOUND STREQUAL TRUE )
         endif (WIN32)
     endif (UNIX)
 
+    message("Searching for libs in ${_libsearchpath}")
     message("Paul says, finding the include directory by looking for Standard_Real.hxx")
     #find the include dir by looking for Standard_Real.hxx
 
@@ -65,7 +67,6 @@ endif( NOT OpenCASCADE_FOUND STREQUAL TRUE )
 message( "Include dir is ${OpenCASCADE_INCLUDE_DIR}")
 message( "Link dir is ${OpenCASCADE_LINK_DIRECTORY}")
 message( "_libsearchpath is ${_libsearchpath}" )
-
 
 if( OpenCASCADE_FOUND STREQUAL TRUE )
     if( DEFINED OpenCASCADE_FIND_COMPONENTS )
@@ -107,4 +108,3 @@ if( OpenCASCADE_FOUND STREQUAL TRUE )
         message( AUTHOR_WARNING "Developer must specify required libraries to link against in the cmake file, i.e. find_package( OpenCASCADE REQUIRED COMPONENTS TKernel TKBRep) . Otherwise no libs will be added - linking against ALL OCC libraries is slow!")
     endif( DEFINED OpenCASCADE_FIND_COMPONENTS )
 endif( OpenCASCADE_FOUND STREQUAL TRUE )
-

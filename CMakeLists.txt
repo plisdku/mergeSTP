@@ -17,6 +17,7 @@ find_package(OpenCASCADE REQUIRED TKPrim TKSTL TKSTEP TKernel TKMath
 if (OpenCASCADE_FOUND)
     message("Found OpenCASCADE")
     message("Include dirs: ${OpenCASCADE_INCLUDE_DIR}")
+    message("Library dirs: ${OpenCASCADE_LINK_DIRECTORY}")
 else(OpenCASCADE_FOUND)
     message("Did not find OpenCASCADE")
 endif(OpenCASCADE_FOUND)
@@ -37,6 +38,10 @@ include_directories(
 #    ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
+link_directories(
+    ${OpenCASCADE_LINK_DIRECTORY}
+)
+
 add_executable( mergeSTP
     main.cpp
     InteriorVolumes-inl.h
@@ -50,12 +55,12 @@ target_link_libraries( mergeSTP
     TKPrim
     TKSTL
     TKSTEP
-    TKernel
     TKMath
     TKG2d
     TKShHealing
     TKBRep
     TKTopAlgo
+    TKernel
     dl # what the heck is this anyway???  didn't need it on other machine.
 )
 
